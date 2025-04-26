@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from hashlib import sha256
 import inspect
 import logging
 import os
@@ -116,6 +117,7 @@ class CachingFileSystem(AsyncFileSystem):
             The object use to map from original filenames to cached filenames.
             Only one of this and ``same_names`` should be specified.
         """
+        print("Edittable")
         super().__init__(**kwargs)
         if fs is None and target_protocol is None:
             raise ValueError(
@@ -419,9 +421,11 @@ class CachingFileSystem(AsyncFileSystem):
             "__getattribute__",
             "__reduce__",
             "_make_local_details",
+            "_ukey",
             "open",
             "cat",
             "cat_file",
+            "_cat_file",
             "cat_ranges",
             "get",
             "read_block",
@@ -602,7 +606,11 @@ class WholeFileCacheFileSystem(CachingFileSystem):
                 pass
         self._cache_size = None
 
-    def _make_local_details(self, path):
+    async def _ukey(self, path):
+        """Hash of file properties, to tell if it has changed"""
+        return sha256(str(await self.fs._info(path)).encode()).hexdigest()
+
+    async def _make_local_details(self, path):
         hash = self._mapper(path)
         fn = os.path.join(self.storage[-1], hash)
         detail = {
@@ -610,7 +618,7 @@ class WholeFileCacheFileSystem(CachingFileSystem):
             "fn": hash,
             "blocks": True,
             "time": time.time(),
-            "uid": self.fs.ukey(path),
+            "uid": await self._ukey(path),
         }
         self._metadata.update_file(path, detail)
         logger.debug("Copying %s to local cache", path)
@@ -619,9 +627,10 @@ class WholeFileCacheFileSystem(CachingFileSystem):
     async def _cat_file(self, path, start=None, end=None, on_error="raise", callback=DEFAULT_CALLBACK, **kwargs):
         print("here")
         recursive = False
-        paths = self.expand_path(
-            path, recursive=recursive, maxdepth=kwargs.get("maxdepth")
-        )
+        # paths = self.expand_path(
+        #     path, recursive=recursive, maxdepth=kwargs.get("maxdepth")
+        # )
+        paths = [path]
         getpaths = []
         storepaths = []
         fns = []
@@ -630,7 +639,7 @@ class WholeFileCacheFileSystem(CachingFileSystem):
             try:
                 detail = self._check_file(p)
                 if not detail:
-                    fn = self._make_local_details(p)
+                    fn = await self._make_local_details(p)
                     getpaths.append(p)
                     storepaths.append(fn)
                 else:
@@ -645,13 +654,13 @@ class WholeFileCacheFileSystem(CachingFileSystem):
 
         if getpaths:
             if self.fs.async_impl:
-                print("here")
-                await self._get(getpaths, storepaths)
+                await self.fs._get(getpaths, storepaths, recursive, callback)
             # Support sync base
             else:
                 self.fs.get(getpaths, storepaths)
             self.save_cache()
 
+        print(start)
         callback.set_size(len(paths))
         for p, fn in zip(paths, fns):
             with open(fn, "rb") as f:
@@ -708,6 +717,7 @@ class WholeFileCacheFileSystem(CachingFileSystem):
         return out
 
     def _open(self, path, mode="rb", **kwargs):
+        print("here1")
         path = self._strip_protocol(path)
         if "r" not in mode:
             hash = self._mapper(path)

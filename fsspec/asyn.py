@@ -327,7 +327,10 @@ class AsyncFileSystem(AbstractFileSystem):
     def __init__(self, *args, asynchronous=False, loop=None, batch_size=None, **kwargs):
         self.asynchronous = asynchronous
         self._pid = os.getpid()
+
+        print("hi", asynchronous, loop)
         if not asynchronous:
+            print("new loop")
             self._loop = loop or get_loop()
         else:
             self._loop = None
@@ -677,6 +680,7 @@ class AsyncFileSystem(AbstractFileSystem):
         callback.set_size(len(lpaths))
         for lpath, rpath in zip(lpaths, rpaths):
             get_file = callback.branch_coro(self._get_file)
+            print(get_file(rpath, lpath, **kwargs))
             coros.append(get_file(rpath, lpath, **kwargs))
         return await _run_coros_in_chunks(
             coros, batch_size=batch_size, callback=callback
