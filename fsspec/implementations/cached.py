@@ -9,6 +9,7 @@ import weakref
 from shutil import rmtree
 from typing import TYPE_CHECKING, Any, Callable, ClassVar
 
+from fsspec.asyn import AsyncFileSystem
 from fsspec import AbstractFileSystem, filesystem
 from fsspec.callbacks import DEFAULT_CALLBACK
 from fsspec.compression import compr
@@ -38,7 +39,7 @@ class WriteCachedTransaction(Transaction):
         self.fs = None  # break cycle
 
 
-class CachingFileSystem(AbstractFileSystem):
+class CachingFileSystem(AsyncFileSystem):
     """Locally caching filesystem, layer over any other FS
 
     This class implements chunk-wise local storage of remote files, for quick
@@ -614,6 +615,52 @@ class WholeFileCacheFileSystem(CachingFileSystem):
         self._metadata.update_file(path, detail)
         logger.debug("Copying %s to local cache", path)
         return fn
+
+    async def _cat_file(self, path, start=None, end=None, on_error="raise", callback=DEFAULT_CALLBACK, **kwargs):
+        print("here")
+        recursive = False
+        paths = self.expand_path(
+            path, recursive=recursive, maxdepth=kwargs.get("maxdepth")
+        )
+        getpaths = []
+        storepaths = []
+        fns = []
+        out = {}
+        for p in paths.copy():
+            try:
+                detail = self._check_file(p)
+                if not detail:
+                    fn = self._make_local_details(p)
+                    getpaths.append(p)
+                    storepaths.append(fn)
+                else:
+                    detail, fn = detail if isinstance(detail, tuple) else (None, detail)
+                fns.append(fn)
+            except Exception as e:
+                if on_error == "raise":
+                    raise
+                if on_error == "return":
+                    out[p] = e
+                paths.remove(p)
+
+        if getpaths:
+            if self.fs.async_impl:
+                print("here")
+                await self._get(getpaths, storepaths)
+            # Support sync base
+            else:
+                self.fs.get(getpaths, storepaths)
+            self.save_cache()
+
+        callback.set_size(len(paths))
+        for p, fn in zip(paths, fns):
+            with open(fn, "rb") as f:
+                f.seek(start)
+                out[p] = f.read(end - start)
+            callback.relative_update(1)
+        if isinstance(path, str) and len(paths) == 1 and recursive is False:
+            out = out[paths[0]]
+        return out
 
     def cat(
         self,
