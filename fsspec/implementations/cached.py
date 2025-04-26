@@ -630,6 +630,7 @@ class WholeFileCacheFileSystem(CachingFileSystem):
         # paths = self.expand_path(
         #     path, recursive=recursive, maxdepth=kwargs.get("maxdepth")
         # )
+        print(start)
         paths = [path]
         getpaths = []
         storepaths = []
@@ -652,6 +653,8 @@ class WholeFileCacheFileSystem(CachingFileSystem):
                     out[p] = e
                 paths.remove(p)
 
+        start0 = start
+        print(start, getpaths, storepaths)
         if getpaths:
             if self.fs.async_impl:
                 await self.fs._get(getpaths, storepaths, recursive, callback)
@@ -660,12 +663,19 @@ class WholeFileCacheFileSystem(CachingFileSystem):
                 self.fs.get(getpaths, storepaths)
             self.save_cache()
 
-        print(start)
+        if not start:
+            start = 0
+
+        if not end:
+            # TODO:
+            pass
+
         callback.set_size(len(paths))
         for p, fn in zip(paths, fns):
             with open(fn, "rb") as f:
                 f.seek(start)
-                out[p] = f.read(end - start)
+                out[p] = f.read()
+                # out[p] = f.read(end - start)
             callback.relative_update(1)
         if isinstance(path, str) and len(paths) == 1 and recursive is False:
             out = out[paths[0]]
